@@ -1,0 +1,22 @@
+
+    PatchDPOTrainer()
+
+    FastLanguageModel.from_pretrained
+    FastLanguageModel.get_peft_model
+
+    не проверяем связывание входных и выходных эмбеддингов
+
+
+    training_args = CPOConfig(
+        output_dir=output_dir, report_to="wandb", **config["cpo"], **trainer_config
+    )
+
+    trainer = CPOTrainer(
+        model=model,
+        args=training_args,
+        processing_class=tokenizer,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+    )
+
+    trainer.train()

@@ -1,0 +1,36 @@
+формирует train/val датасеты из исходного датасета/списка датасетов (split="train") 
+(из конфига датасета | "IlyaGusev/saiga_scored") с предобработкой и фильтрацией
+
+
+CLI:
+  config_path         конфиг
+  train_path          путь сохранения train
+  val_path            путь сохранения valid
+  train_part (=97)    часть train
+
+config:
+  dataset_name        датасет/список датасетов  (id в репозитории)
+  dataset_revision    
+  add_rejected
+  exclude_regex
+  min_score
+
+-----------------------------------------------
+
+- загружаем конфиг датасета (аргумент CLI)
+- загружаем датасет/датасеты (split=train) (поле "dataset_name" из конфига датасета | "IlyaGusev/saiga_scored")
+
+предобработка и фильтрация:
+    - пропускаем строки датасета у которых is_bad_by_regex равен True (если exclude_regex равно True)
+    - пропускаем строки датасета у которых столбец opus_score меньше min_score (конфиг датасета | 8)
+    - берем только столбец 'messages' или если отсутствует то столбец 'conversation' иначе 'prompt' + 'chosen' 
+      (и 'prompt' + 'rejected' если add_rejected==True (конфига датасета))
+    - пропускаем примеры (кроме первого) с одинаковым хэшом (mmh3.hash(s, signed=False))
+    - переименовываем роль bot -> assistant
+    - перемешиваем (random.shuffle)
+
+- делим на train/val в отношении train_part (аргумент CLI | 97) / 100-train_part, в train все примеры для которых остаток от деления хэша 
+  на 100 меньше train_part, в val - больше.
+  Так одинаковые примеры будут попадать в один и тот же набор и не будет утечки данных
+
+сохраняем в ..._train.jsonl ..._val.jsonl (аргументы CLI) (json 1 пример в 1 строке)

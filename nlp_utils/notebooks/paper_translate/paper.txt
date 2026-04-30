@@ -1,0 +1,982 @@
+We find that existing language modeling
+datasets contain many near-duplicate examples
+and long repetitive substrings. As
+a result, over 1% of the unprompted output
+of language models trained on these
+datasets is copied verbatim from the training
+data. We develop two tools that allow
+us to deduplicate training datasets—for example
+removing from C4 a single 61 word English
+sentence that is repeated over 60;000
+times. Deduplication allows us to train models
+that emit memorized text ten times less
+frequently and require fewer training steps
+to achieve the same or better accuracy. We
+can also reduce train-test overlap, which affects
+over 4% of the validation set of standard
+datasets, thus allowing for more accurate
+evaluation. Code for deduplication is released
+at https://github.com/google-research/
+deduplicate-text-datasets.
+
+
+1 Introduction
+
+A key factor behind the recent progress in natural
+language processing is the development of largescale
+text corpora used to train increasingly large
+language models. These datasets have grown from
+single gigabytes to as much as a terabyte over the
+past few years (Chelba et al., 2013; Xue et al., 2020;
+Graff et al., 2003; Brown et al., 2020). Because
+it is so expensive to perform manual review and
+curation on massive datasets, they tend to suffer
+in quality compared to their smaller predecessors.
+This has implications far beyond metrics like perplexity
+and validation loss, as learned models reflect
+the biases present in their training data (Bender
+et al., 2021; Wallace et al., 2019; Sheng et al.,
+2020). Quantitatively and qualitatively understanding
+these datasets is therefore a research challenge
+in its own right (Dodge et al., 2021a).
+
+We show that one particular source of bias, duplicated
+training examples, is pervasive: all four
+common NLP datasets we studied contained duplicates.
+Additionally, all four corresponding validation
+sets contained text duplicated in the training
+set. While naive deduplication is straightforward
+(and the datasets we consider already perform some
+naive form of deduplication), performing thorough
+deduplication at scale is both computationally challenging
+and requires sophisticated techniques.
+We propose two scalable techniques to detect
+and remove duplicated training data. Exact substring
+matching identifies verbatim strings that are
+repeated. This allows us to identify cases where
+only part of a training example is duplicated (§4.1).
+Approximate full document matching uses hashbased
+techniques (Broder, 1997) to identify pairs
+of documents with high n-gram overlap (§4.2).
+We identify four distinct advantages to training
+on datasets that have been thoroughly deduplicated.
+
+1. Over 1% of tokens emitted unprompted from
+a model trained on standard datasets (e.g., C4)
+are part of a memorized sequence (See §6.2)—
+even though the 1.5 billion parameter model
+is much smaller than the 350GB dataset it
+was trained on. By deduplicating the training
+dataset we reduce the rate of emitting memorized
+training data by a factor of 10.
+
+2. Train-test overlap is common in nondeduplicated
+datasets. For example, we find a
+61-word sequence1 in C4 (Raffel et al., 2020)
+that is repeated 61;036 times verbatim in the
+training dataset and 61 times in the validation
+set (0:02% of the samples in each dataset).
+
+This train-test set overlap not only causes researchers
+to over-estimate model accuracy, but
+also biases model selection towards models
+and hyperparameters that intentionally overfit
+their training datasets.
+
+3. Training models on deduplicated datasets is
+more efficient. Processing a dataset with our
+framework requires a CPU-only linear-time
+algorithm. And so because these datasets are
+up to 19% smaller, even including the deduplication
+runtime itself, training on deduplicated
+datasets directly reduces the training
+cost in terms of time, dollar, and the environment
+(Bender et al., 2021; Strubell et al., 2019;
+Patterson et al., 2021).
+
+4. Deduplicating training data does not hurt
+perplexity: models trained on deduplicated
+datasets have no worse perplexity compared
+to baseline models trained on the original
+datasets. In some cases deduplication reduces
+perplexity by up to 10%. Further, because recent
+LMs are typically limited to training for
+just a few epochs (Radford et al., 2019; Raffel
+et al., 2020), by training on higher quality data
+the models can reach higher accuracy faster.
+
+
+To summarize, data duplication offers significant
+advantages and no observed disadvantages. In the
+remainder of this paper we present our text deduplication
+framework in §4, and study the extent of
+duplicate content in common NLP datasets (e.g.,
+C4, Wiki-40B, and LM1B) in §5. We then examine
+the impact of deduplication on test perplexity
+(§6.1) and on the frequency of emitting memorized
+content (§6.2). Finally, we analyze to what extent
+perplexity on existing, released models are
+skewed as a result of overlap between the train and
+test/validation splits (§6.3).
+
+
+2 Related Work
+
+Large language model datasets. While we believe
+our results are independent of model architecture,
+we perform our analysis on Transformerbased
+decoder-only language models (Vaswani
+et al., 2017) trained for open-ended text generation.
+These current state-of-the-art models are trained
+on internet text. For example, the GPT-2 family
+of models Radford et al. (2019) is trained on Web-
+Text, a dataset of web documents highly ranked on
+Reddit—however this dataset was not made available
+publicly. A common dataset starting point is CommonCrawl, an index of public webpages.
+Among the models trained on CommonCrawl include
+GPT-3 (Brown et al., 2020) with the addition
+of book datasets, GROVER (Zellers et al., 2019) on
+a restricted subset filtered to news domains called
+RealNews, and T5 (Raffel et al., 2020) on a cleaned
+version of common crawl called C4. Other models
+are trained on more curated Internet sources—for
+example Guo et al. (2020) used high quality processed
+Wikipedia text from 40 different languages
+to train monolingual 141.4M parameter language
+models. Non-English models necessarily use different
+datasets; Zeng et al. (2021) for instance introduced
+PANGU-, a family of models with up to
+200B parameters that were trained on a non-public
+corpus of cleaned and filtered Chinese-language
+documents from CommonCrawl and other sources.
+Since many of these datasets are not public, we
+deduplicate three that are: Wiki-40B, C4, and
+RealNews–as well as the One Billion Word Language
+Model Benchmark (Chelba et al., 2013), a
+smaller dataset commonly used for evaluation.
+
+
+Contamination of downstream tasks. When
+models are trained on datasets constructed by crawling
+the Internet, it is possible the model will train
+on the test set of downstream target tasks. For example,
+Radford et al. (2019, §4) performed a posthoc
+analysis to identify 8-gram overlaps between
+GPT-2’s training set and datasets used for evaluation,
+and Dodge et al. (2021b) analyzed C4 and
+found that up to 14.4% of test examples for various
+standard tasks were found verbatim (normalizing
+for capitalization and punctuation) in the dataset.
+A more proactive approach removes contaminated
+data. Trinh and Le (2018, Appendix B) removed
+documents from their CommonCrawl-based train
+set that overlapped substantially with the commonsense
+reasoning used for evaluation. And GPT-3
+(Brown et al., 2020, §5) did the reverse and removed
+downstream evaluation examples from their
+training data by conservatively filtering out any
+train set examples with a 13-gram overlap with
+any evaluation example. Up to 90% of tasks were
+flagged as potentially contaminated.
+
+
+In our research, we do not focus on the impact of
+duplicate text in pretrained models on downstream
+benchmark tasks; instead we address how duplicate
+text in the LM training and validation sets impacts
+model perplexity and the extent to which generated
+text included memorized content.
+
+Memorizing training data. The privacy risks of
+data memorization, for example the ability to extract
+sensitive data such as valid phone numbers
+and IRC usernames, are highlighted by Carlini et al.
+(2020). While their paper finds 604 samples that
+GPT-2 emitted from its training set, we show that
+over 1% of the data most models emit is memorized
+training data. In computer vision, memorization of
+training data has been studied from various angles
+for both discriminative and generative models (e.g.
+Arpit et al., 2017; Webster et al., 2019; Feldman
+and Zhang, 2020; Stephenson et al., 2021; Teterwak
+et al., 2021).
+
+Duplicate text in training data. The Book Corpus
+(Zhu et al., 2015), which was used to train popular
+models such as BERT, has a substantial amount
+of exact-duplicate documents according to Bandy
+and Vincent (2021). Allamanis (2019) shows that
+duplicate examples in code datasets cause worsened
+performance on code understanding tasks.
+
+
+3 Language Modeling Datasets
+
+We analyze the presence of duplicate text in four
+datasets of varying sizes that have been used for
+training natural language generation systems, producing
+general-purpose pre-trained models, and for
+language model benchmarking. While this paper
+restricts itself to English datasets, we expect that
+non-English datasets suffer from similar issues and
+could likewise benefit from de-duplication.
+
+Wikipedia (Wiki-40B) consists of multi-lingual
+cleaned Wikipedia text (Guo et al., 2020). We
+take the English portion, which contains 2.9M
+Wikipedia pages with an average length of 768 BPE
+tokens. The dataset creators do not indicate any
+deduplication was performed aside from removing
+redirect-pages (e.g., “sunflower” to “Helianthus”).
+
+One-Billion Word benchmark (LM1B) contains
+30M sentences of news commentary (Chelba
+et al., 2013). Unlike the other datasets we analyze,
+LM1B’s examples are one sentence long rather
+than multi-sentence documents. The average example
+length is 32 BPE tokens. While this dataset
+is extremely standard for benchmarking language
+models, Radford et al. (2019, Sec 4) note it has
+13.2% overlap of the test set with the train set.
+
+Colossal Cleaned Common Crawl (C4) is
+made up of 360M web documents, with an average
+length of 486 BPE tokens (Raffel et al., 2020). C4 was introduced as a pre-training dataset for T5, a set
+of encoder-decoder models which have been widely
+used in fine-tuned downstream tasks. The dataset
+was previously deduplicated in a more sophisticated
+process than the prior two datasets. Each
+paragraph was hashed and paragraphs resulting in
+hash collisions were removed. This was followed
+by a pass that removed placeholder text, code, and
+prohibited words. See Dodge et al. (2021a) for a
+detailed breakdown of the source text in C4.
+
+RealNews is a subset of the Common Crawl consisting
+of articles from news domains (Zellers et al.,
+2019). It contains 31M documents with average
+length 793 BPE tokens. RealNews was deduplicated
+by inserting a hash of the first 100 characters
+of each document into a bloom filter (Bloom, 1970)
+and then excluding any document which resulted in
+a hash collision. Like C4, examples with duplicate
+URLs were excluded.
+
+
+4 Methods for Identifying Duplicates
+
+The simplest technique to find duplicate examples
+would be to perform exact string matching between
+all example pairs, but as we will show, this is insufficient.
+We introduce two complementary methods
+for performing deduplication. First, using a suffix
+array (Manber and Myers, 1993), we remove
+duplicate substrings from the dataset if they occur
+verbatim in more than one example. Second,
+we use MinHash (Broder, 1997), an efficient algorithm
+for estimating the n-gram similarity between
+all pairs of examples in a corpus, to remove entire
+examples from the dataset if they have high n-gram
+overlap with any other example.
+We consider a dataset D = fxigNi
+=1 as a collection
+of examples xi. Each of these examples is itself
+a sequence of tokens: xi =
+
+x1i
+; x2i
+;    ; xsi
+i
+
+.
+
+4.1 Exact Substring Duplication
+
+Due to the diversity of possibilities in human language,
+it is rare for the same idea to be expressed
+identically in multiple documents unless one expression
+is derived from the other, or both are quoting
+from a shared source. This observation motivates
+deduplicating exact substrings. We call our
+approach EXACTSUBSTR. When two examples
+xi and xj share a sufficiently long substring (that
+is, a substring for which xa::a+k
+i = xb::b+k
+j ), that
+substring is removed from one of them. Based
+on statistical analyses (§B), we select k = 50 tokens
+as the minimum matching substring length.
+
+A breakdown of the computation needed for this
+approach can be found in Appendix B.
+
+
+4.1.1 Suffix Arrays
+
+This exact-substring-matching criterion, while conceptually
+simple, is computationally prohibitive
+with naive (quadratic) all-pair matching. To improve
+the efficiency, we concatenate all the examples
+of the entire dataset D into a giant sequence S,
+and construct a Suffix Array A of S. A suffix array
+(Manber and Myers, 1993) is a representation of a
+suffix tree (Weiner, 1973) that can be constructed
+in linear time in kSk (Kärkkäinen and Sanders,
+2003) and enables efficient computation of many
+substring queries; in particular, they allow us to
+identify duplicated training examples in linear time.
+Suffix arrays have the advantage over suffix trees
+in that they are 10–100 more memory efficient
+(Manber and Myers, 1993), requiring just 8 bytes
+per input token, though they are asymptotically
+less efficient for some query types. They have been
+used widely in NLP, such as for efficient TF-IDF
+computation (Yamamoto and Church, 2001) and
+document clustering (Chim and Deng, 2007).
+The suffix array A for a sequence S is a
+lexicographically-ordered list of all suffixes contained
+in the sequence. Formally,
+
+For example, the suffixes of the sequence “banana”
+are (“banana”, “anana”, “nana” “ana”, “na”, “a”)
+and so the suffix array is the sequence (6 4 2 1 5 3).
+In practice, we construct S from the bytes of the
+BPE tokenization of the text (§6).
+
+
+4.1.2 Substring matching
+
+After constructing A, it is straightforward to identify
+duplicated training examples. Suppose that
+the sequence s was repeated exactly twice in the
+training dataset S at positions i and j, that is,
+Si::i+jsj = Sj::j+jsj. Then the indices i; j will occur
+adjacent to each other in the suffix array A.
+
+Finding all repeated sequences is thus a matter of
+linearly scanning the suffix array from beginning to
+end and looking for sequences Ai;Ai+1 that share
+a common prefix of at least some threshold length.
+Any satisfying sequences are recorded. This algorithm
+is embarrassingly parallel, and so we can
+efficiently process the dataset. Based on experimentation
+(Appendix B), we choose a threshold
+length of 50 BPE tokens for all experiments.
+
+4.2 Approximate Matching with MinHash
+
+We also perform approximate deduplication based
+on matching entire examples. This method, which
+we call NEARDUP, is a good complement to the
+exact substring matching, especially for web crawl
+text, as it handles the very common case of documents
+being identical except for interspersed templated
+fields (such as the last row of Table 1).
+
+MinHash (Broder, 1997) is an approximate
+matching algorithm widely used in large-scale
+deduplication tasks (Versley and Panchenko, 2012;
+Gabriel et al., 2018; Gyawali et al., 2020), including
+to deduplicate the training set for a large
+Chinese-language LM (Zeng et al., 2021). Given
+two documents xi and xj , the main idea is to represent
+each document by its respective set of n-grams
+di and dj . We can then use hash functions to approximate
+the Jaccard Index (Jaccard, 1912):
+
+If the Jaccard Index between di and dj is sufficiently
+high, it is likely that documents are approximate
+matches of each other. To efficiently approximate
+the Jaccard index, MinHash constructs document
+signatures by sorting each of the n-grams
+via a hash function, and then keeping only the k
+smallest hashed n-grams. There are multiple ways
+to construct estimators of the Jaccard index from
+these kinds of signatures (Cohen, 2016).
+
+In our implementation, we use 5-grams and a
+signature of size 9,000. The probability that two
+documents are considered a potential match is
+
+where b = 20 and r = 450 are user-settable parameters
+to control the strength of the filter. See
+Appendix A for more details.
+
+For each pair of documents identified as a potential
+match, more computationally expensive similarity
+metrics can be employed as a subsequent filtering
+step. In particular, we identify two documents
+as duplicates if they are matched by the MinHash
+algorithm and their edit similarity is greater than
+0.8. The edit similarity between token sequences
+xi and xj is defined as:
+
+To build clusters of similar documents, we construct
+a graph that has an edge between two documents
+if they are considered a match. Then, we use the method introduced in Ła˛cki et al. (2018) to
+identify connected components. A breakdown of
+the computation needed is given in Appendix A.
+
+
+5 Deduplication Results
+
+We deduplicate each of the four datasets with both
+of our two techniques. When text was duplicated
+across multiple data splits, we prioritized keeping
+a copy in the test or validation set and removing it
+from the train set.
+
+5.1 Amount of Text Removed
+
+With NEARDUP, we found that the web-scrape
+datasets contain between 3.04% (on C4) to 13.63%
+(on RealNews) near duplicates (Table 2). Nearduplicate
+text is much less common in Wiki-40B,
+forming only 0.39% of the train set.2 In C4, the majority
+(1.8M) of near-duplicate clusters consisted of
+just a single pair of examples that matched against
+each other, but there were 280 clusters with over
+5,000 examples in them (Figure 1), including one
+cluster of size 250,933.
+
+On average with EXACTSUBSTR, we remove
+more total content than with NEARDUP (despite
+EXACTSUBSTR not removing any examples
+outright)—for example removing 7:18% of the tokens
+in C4. The exception is LM1B, where EXACTSUBSTR
+removes 8 less data than NEARDUP.
+On investigation, we find this is due to the fact that
+LM1B documents are significantly shorter: 90%
+of all documents are under 50 tokens, and so are
+not even candidates for potential matches even if
+the entire sequence matched verbatim. We find
+that both NEARDUP and EXACTSUBSTR remove
+similar content—77% of the training examples that
+NEARDUP removes from C4 have at least one verbatim
+length-50 match found by EXACTSUBSTR.
+
+5.2 Properties of Duplicated Text
+
+While the authors of both RealNews and C4 explicitly
+attempted deduplication during dataset construction,
+the methods were insufficient to capture
+the more subtle types of duplicate text commonly
+found on the internet. In C4 and Wiki-40B, we
+qualitatively observe that much of the text identified
+as near-duplicated is computer-generated. The
+text is identical except for the names of places, businesses,
+products, dates, and so on. Because these
+examples frequently differ by just a few words at
+a time, deduplication strategies relying on exact
+string matching would fail to identify a match. Example
+duplicate pairs from each dataset can be
+found in Table 1 (more examples in the Appendix).
+
+For RealNews and LM1B, derived from news
+sites, we observe that many near-duplicates occur
+because the same news article appears on multiple
+news sites with slightly different formatting. For
+example, in LM1B, there is one example that starts
+“MINEOLA , N.Y. - New York officials say [...]” and
+another that starts “( AP ) - New York officials say
+[...]”. The two examples are otherwise identical.
+
+
+5.3 Train / Test Set Leakage
+
+Both deduplication methods identify overlap between
+the train set and the validation set (Table 2).
+For example, 4.6% of the C4 validation set and
+14.4% of the RealNews validation set examples
+had an approximate duplicate in their respective
+training sets. Such duplication is problematic since
+it could cause evaluation metrics to be unfairly inflated
+for models that are better at memorizing their
+train sets. We evaluate the effect of this leakage on
+publicly released models in Section 6.3.
+
+
+6 Impact on Trained Models
+
+We trained 1.5B parameter “XL", decoderonly,
+Transformer-based language models similar
+to GPT-2, on C4-ORIGINAL, C4-NEARDUP, and
+C4-EXACTSUBSTR, respectively. We use the T5
+codebase and model architecture from Raffel et al.
+(2020), and each model was trained for about two
+epochs on its respective dataset. To better understand
+the amount of variance in the perplexities
+of trained models, we also trained three different
+random seeds of the 110M parameter “base" model
+for each of the above three datasets—for a total of
+nine base-sized models.
+
+For all experiments, we used a Byte Pair Encoding
+(BPE) vocabulary trained on C4-NEARDUP with a budget of 50K tokens, which resulted in a
+vocabulary the same size as GPT-2’s. We trained
+with a maximum sequence length of 512 tokens
+(for longer documents, we randomly extracted subsequences
+of this length.) Further training details
+can be found in Appendix C.
+
+
+6.1 Model Perplexity
+
+We computed the perplexity of our trained models
+on the validation sets of LM1B and Wiki-40B,
+and on subsets of the C4 validation set (Figure 2).
+For the base size, we observe that all models have
+similar perplexity on the original C4 validation set
+and on validation set examples that were identified
+as unique (no near-duplicate in either train
+or validation). However, both models trained on
+deduplicated data have significantly higher perplexity
+on validation set examples that have duplicates
+in the training set than the model trained on the
+original C4. EXACTSUBSTR-deduplicated results
+in higher perplexity than NEARDUP-deduplicated.
+These trends holds true for the XL sized model as
+well. While this may suggest EXACTSUBSTR duplication
+results in models least overfit on the train
+set, note that both of these techniques have used
+separate duplicate thresholds and a different choice
+of thresholds could change the results.
+
+When evaluating on the validation sets of LM1B
+and Wiki-40B, we found that models trained on
+NEARDUP-deduplicated C4 consistently achieved
+lowest perplexity (for LM1B eval with base models,
+see Appendix Figure 7). EXACTSUBSTR deduplication
+decreases perplexity of the XL model by
+almost 3 points perplexity on Wiki-40B which is much larger than the variation of about 1 point perplexity
+we observed in the base models. This is
+despite seeing fewer tokens of training data overall.
+
+Lastly, we note all our XL models achieved <35
+perplexity on LM1B, which is less than the 42.16
+perplexity reported for the 1.5B GPT-2 using a
+vocabulary the same size as ours.
+
+
+6.2 Generated Text
+
+Data duplication has the effect of biasing the
+trained LM towards particular types of examples.
+This can contribute to a lower diversity of generations,
+and increased likelihood that the generated
+content is copied from the training data (Carlini
+et al., 2020). For our generation experiments, we
+use top-k random sampling with k = 50 and experiment
+with prompted and unprompted generation.
+
+No prompt. We first evaluate memorization tendencies
+in the case where the model is asked
+to generate text without any prompt sequence.
+We generate 100,000 samples, each up to 512
+tokens in length (examples provided in the Appendix).
+For each generated token, we say the
+token is memorized if it is part of a 50-token substring
+that is exactly contained in the training data.
+On XL-ORIGINAL, over 1% of the generated tokens
+belong to memorized sub-sequences (see Table
+4). This is  10 more memorization than XLEXACTSUBSTR
+or XL-NEARDUP. Some example
+subsequences that were copied verbatim from the
+train set can be found in Table 9 in the Appendix.
+
+With prompting. In most real use cases, language
+model generation is controlled by providing
+a prompt for the model to continue. We experiment
+with four possible prompt sources: training
+examples identified by EXACTSUBSTR as having
+near-duplicates in the train set (train dup), training
+examples identified as unique (train unique),
+validation set examples with a near-duplicate in
+the train set (valid in train), and validation set examples identified as unique across all splits (valid
+unique). We select the first 32 tokens of each example
+as the prompt, which means we can evaluate the
+fraction of generations which are near-duplicates
+with the ground-truth continuation for the prompt
+(Figure 3). When the prompt comes from duplicate
+examples in the train set, XL-ORIGINAL reproduces
+the groundtruth continuation over 40% of the
+time. XL-EXACTSUBSTR and XL-NEARDUP still
+copy the groundtruth more often when the prompt
+comes from a duplicate example than when the
+prompt comes from a unique example, suggesting
+that more stringent deduplication may be necessary
+to remove memorization tendencies entirely.
+
+
+6.3 Impact on Existing Models
+
+Train-test leakage does not just impact models
+trained on C4. Table 5 shows that the presence
+of near-duplicates of the evaluation set in the train
+set has a significant impact on model perplexity
+for two standard models: Transformer-XL (Dai
+et al., 2019), which was trained on LM1B, and
+GROVER (Zellers et al., 2019), which was trained
+on RealNews. For Transformer XL, the perplexity halves on examples identified as near-duplicates.
+For GROVER, the difference, though not quite as
+stark, is present in both model sizes considered.
+
+Existing models also suffer from the problem
+of generating text from their train sets. We find
+that 1:38% of the tokens in the official release of
+25k GROVER-Mega outputs 3 are part of verbatim
+matches in RealNews of at least length 50. Likewise,
+more than 5% of the tokens in ~200k sequences
+outputted by GPT-Neo 1.3B (Black et al.,
+2021) are part of a 50 token matches of its training
+data, the Pile (Gao et al., 2020).
+
+
+7 Discussion
+
+The focus of this paper is on the datasets used to
+train language models. While recent work focused
+on documenting the potential harms that could arise
+from problematic datasets (Bender and Friedman,
+2018; Gebru et al., 2020), less work has been done
+to quantitatively analyze properties of real language
+modelling datasets, like Dodge et al. (2021a) has
+done for C4. Our paper provides analysis on one
+particular axis, that of data duplication.
+
+Our experiments measured what could be quantified:
+the amount of duplicate content in common
+datasets, the effect of deduplication on trained
+model perplexity, and the reduction of memorized
+content in trained models through deduplication.
+We do not focus on the nature of the data being
+removed by deduplication or memorized by LMs.
+
+Privacy is an important subject for future work,
+as memorized training data has significant privacy
+consequences. By this, we mean the standard privacy
+definition that a model should not reveal anything
+particular to the specific dataset it was trained
+on, as opposed to another training dataset from a
+similar distribution (Shokri et al., 2017).4 Training
+on standard datasets that have not yet been
+deduplicated results in models that are particularly
+sensitive to examples that happened to be repeated
+multiple times, and this has negative privacy implications.
+For instance, it could violate a person’s
+expectations of privacy if their publicly available
+personal data appeared in a different, surprising
+context. Downstream applications of LMs, such as the game AI Dungeon5, should also not output
+memorized content like adverts for real products.
+
+We stress that in our experiments, we do not distinguish
+between undesired memorized text (such
+as phone numbers), innocuous memorized text
+(common phrases), and text we may want to be
+memorized (such as a quote by a public figure),
+and instead treat all instances of the LM generating
+text that closely matches the training set as
+problematic. While we qualitatively observed that
+much of the identified memorized content was relatively
+innocuous, a more systematic study of the
+risks associated with the detected memorization
+was beyond the scope of this work.
+
+We also do not investigate the negative consequences
+of deduplication. Some language tasks
+explicitly require memorization, like document retrieval
+or closed-book question answering. Also,
+text that gives attribution is often duplicated across
+documents, so removing duplicate substrings could
+correspond to removing just the attribution, which
+could result in models that learn the content without
+its attached attribution. Deduplication is also
+not sufficient to remove privacy-sensitive data like
+bank passwords and medical records which should
+never be used in training data (Brown et al., 2022).
+
+Ultimately, whether memorization is a desired
+property of a language model, or else risky and
+unwanted, depends both on the nature of the text
+that has been memorized and on the downstream
+applications of the trained model. However, since
+the trend has been towards creating datasets and
+models that are application-agnostic, we encourage
+researchers to think carefully about the limitations
+of the data they have collected and the how the
+model’s intended usage constrains what should be
+part of the training set. Developing techniques to
+memorize or forget specific sequences depending
+on the end application is a promising research direction.
+
+
+8 Conclusion
+
+We encourage future language model research to
+perform dataset deduplication, either by training
+on the deduplicated datasets we release, using the
+deduplication tools we release, or following our
+approach to deduplicate datasets with new tools.
+
+The exact technique used to perform deduplication
+is less important than performing stringent
+deduplication in the first place. On the whole, deduplication does not harm, and sometimes improves,
+model perplexity, despite the fact that the deduplicated
+datasets are smaller and faster to train on.
+It is especially important that there are no duplicates
+between the training and testing sets, because
+overlap here explicitly encourages selecting models
+that memorize the training data. Lastly, deduplication
+helps to reduce some of the privacy concerns
+around LMs memorizing their training data.
+
+
+Ethics
+
+The developers of large language models typically
+attempt to create training data that reflects
+natural human communication, but current methods
+to collect and curate such datasets are fallible.
+There are multiple reasons some text ends
+up over-represented. For example, bot replies,
+auto-generated templates, and licenses are repeated
+for structural (e.g., legal, economical) reasons (as
+was also observed by Dodge et al. (2021a)). Additionally,
+common techniques for acquiring and
+“cleaning” data can result in an over-representation
+of particular subsets of world users, often those
+who are English-speaking and publishing in established
+forums. This effectively under-represents
+non-English speakers as well as groups whose communication
+mostly occurs outside of the public
+web. In this paper, we focus on the problem of
+over-representation of some types of text (structural
+duplicates) but do not address the problem of
+under-representation of others.
+
+Additionally, while we discuss when memorized
+content might be desired and when it might not
+be desired, our analysis does not disambiguate
+these two cases. Work to disambiguate helpful
+from harmful memorization is tremendously complex
+and would require a different set of research
+methodologies than are presented in this work.
+
+
+A Further Details on NEARDUP
+
+For our MinHash based deduplication method, documents
+are first space tokenized, then each consecutive
+5-gram is hashed using tabulation hashing.
+The set of these hashes is the signature for the document.
+For each element in a document’s signature,
+the element is hashed using k other hash functions.
+The minimum hashed element for each of the k
+hash functions is stored. These minimum hashes
+are then partitioned into r buckets, with b hashes
+per bucket. These b hashes are augmented into a
+single value, then if two documents have the same
+value in at least one bucket, they’ll be marked as
+a potential match. The probability that two documents
+are considered a potential match is equal
+to
+
+where si;j is the Jaccard index between the two
+documents i and j. For document pairs that were
+identified as potential matches, we computed their
+actual Jaccard index, and if that was above 0.8,
+we computed their edit similarity. Document pairs
+with edit similarity higher than 0.8 were identified
+as duplicates. After some experimentation, we
+chose to use b = 20, and r = 450, so k = 9; 000,
+so as to make sure a collision at the desired Jaccard
+index threshold of 0.8 had a high probability of
+occurring.
+
+We also tested an alternative configuration—
+filtering to document pairs with Jaccard index of at
+least 0.9 and edit similarity of at least 0.9. In this
+case, we used b = 20, r = 40, and k = 800. Figure
+4 shows the histogram of Jaccard similarities
+and edit similarities for all document pairs which
+collided in min-hash space, for our chosen configuration
+(blue) and for the alternative configuration
+(orange). This allows us verify if the threshold
+chosen has few comparisons around the chosen
+threshold, then we’ve likely captured the majority
+of actual near duplicates above that threshold. To
+verify that yourself, look at the left hand tails of
+the distributions. Since both 0.8 and 0.9 begin to
+vanish at the same point (in spite of the fact that the
+two thresholds are optimized for accuracy around
+different thresholds), we feel comfortable saying
+that we’re capturing the majority of actual near
+duplicates.
+
+Computational Analysis Let N be the number
+of documents and T be the maximal number of tokens in a document. Edit similarity has a worst case
+complexity of T2, so the worst case complexity is
+
+since b, k, and T are all  N. The left term is the
+complexity of grouping by the signatures, and the
+right represents the pathological worst case of all
+documents falling into the same B buckets.
+
+The highly distributed NEARDUP implementation
+we employed is one used for large-scale production
+tasks at Google. On the English C4 dataset,
+the algorithm consumed approximately 41.5 kWh
+of energy. Note that our choices of k and b were
+designed to produce very high recall, and with different
+parameters, the algorithm could be made
+much more energy efficient while producing similar
+results.
+
+
+B Further Details on EXACTSUBSTR
+
+Parallel linear time construction. We build a
+parallelized linear time suffix array algorithm. As
+a building block, we make black-box use of the
+SA-IS algorithm for constructing a suffix array
+in linear time Nong et al. (2009); Ko and Aluru
+(2003). Unfortunately, this algorithm is not easily
+parallelized directly, so we introduce a simple
+divide and conquer approach to parallelizing the
+array construction.
+
+We build our implementation in Rust and extend
+an existing suffix array library6 with three
+modification. The first two are straightforward implementation
+differences: we modify the code to
+allow datasets larger than 4GB, and we remove the
+requirement that strings parse as valid UTF-8 sequences
+in favor of raw byte sequences. Our third
+change is more significant: we re-implement the
+algorithm so that we can stream the suffix array
+itself off disk.
+
+Parallel partial suffix array construction. Our
+divide and conquer suffix array construction algorithm
+starts by partitioning the dataset intoK different
+“splits” with SA-IS run over independently on
+each split in parallel. This algorithm still requires
+O(N) work but runs in O(N=K) wall-clock time.
+This gives us N separate suffix arrays Ai.
+
+Given two suffix arrays A1 and A2 for two sequences
+S1 and S2 it’s not completely trivial to
+construct a single suffix array A for S = S1 jj S2
+because of the boundary conditions. Instead, we don’t build the data S = S1 jj S2 but rather let
+S01
+= S1 jj S2[uptoK] for some K greater than
+the longest substring match. Then we build the
+arrays on S01
+and S2. To merge the arrays together
+we can remove the items from the first array after
+index jS1j and merge-sort insert them into the
+second.
+
+Parallel merge of partial suffix arrays. We
+now merge these separate arrays together into a
+single suffix array A, Consider the simpler case of
+two partial suffix arrays B and C that we would
+like to merge together. We can achieve this by
+letting i = 0 index B and j = 0 index C. Each
+iteration of the algorithm then pushes Bi into A
+if SBi:: < SCi and Ci otherwise, repeating until
+i = jBj 􀀀 1 and j = jCj 􀀀 1. To generalize to K
+splits, we need only replace the single comparison
+above with a min-heap requiring O(logK)  10
+work on each iteration.
+
+Observe that in the general case this algorithm
+is O(Nmlog(K)) where N is the length of the
+dataset, m is the average length of a prefix match,
+and K is the number of splits. It is therefore incorrect
+to call this algorithm linear time in the general
+case, for ours it is. Because the length of the longest
+match is bounded above by the length of the longest
+sequence, as long as the size of the dataset is independent
+of the length of the longest sequence in the
+dataset, this algorithm remains efficient.
+
+Again, we can parallelize this operation among
+L simultaneous jobs (in practice we set K = L as
+the number of threads on our machine). In the K =
+2 case, job l processes i 2 [jN=L; (j + 1)N=L],
+choosing the bounds of j by binary searching into C so that SBi < SCj < SBj+1. The case where
+K > 2 is identical except that we repeat this over
+all K partial suffix arrays.
+
+
+Computational Analysis. We run our algorithm
+on a single VM on the cloud with 96 cores and
+768GB of memory. Our algorithm is efficient, for
+example processing the Wiki-40B training set (3
+million examples containing 4GB of text) in 2:3
+minutes wall-clock time (2:1 CPU-hours of work).
+The 350GB C4 dataset takes under 12 hours (wallclock)
+to build a suffix array; although we are still
+memory constrained and so this corresponds to
+ 1000 CPU-hours. Once the suffix array has been
+constructed, it takes under an hour to deduplicate
+the C4 dataset.
+
+Note that this algorithm still requires that the
+dataset itself fits in memory (so that we can efficiently
+index in arbitrary positions), but we do not
+need to fit the entire suffix array into memory. This
+is fortunate since our suffix array requires an 8
+space overhead. For example, the suffix array for
+the 350GB C4 is 1:5TB.
+
+Compared to the cost of training a language
+model on this dataset, the additional work required
+to deduplicate the training dataset is negligible.
+
+
+Setting a threshold of duplicates. An important
+question is how long must a substring match be
+before it is counted as a duplicate. In Figure 5, we
+plot the frequency of substring matches within the
+four datasets we will consider. For each substring
+of length k, we compute the probability that there
+exists another sequence of length k identical to this one; formally:
+
+We choose 50 tokens as the threshold to be conservative:
+the “bend in the knee” occurs at 10 tokens,
+and manual inspection of length-25 matches found
+no false positives. We then doubled this value to
+have an exceptionally large margin for error.
+
+C Further Details on Model Training
+
+Each model was trained for two epochs. Since both
+C4-ORIGINAL and C4-EXACTSUBSTR contain approximately
+365M examples, we performed 152K
+steps with a batch size of 4800 (or approximately
+2 epochs). C4-NEARDUP contains approximately
+350M examples, we performed 146K steps (or approximately
+2 epochs). On a 128-core TPU v3 pod
+slice, XL models trained on C4-ORIGINAL and C4-
+EXACTSUBSTR took approximately 131 hours (5.5
+days) to train, while the XL model trained on C4-
+NEARDUP took approximately 126 hours to train.
+Like T5, models were trained with the Adafactor
+optimizer (Shazeer and Stern, 2018). A constant
+learning rate of 0.01 was used for the base models
+and 0.001 for the XL models.
+
+The 1.5B parameter XL models had 24 layers,
+each with 32 attention heads. The model embedding
+size was 2,048, the feed forward layers had
+a hidden size of 5,120, and the key/value dimension
+size for the attention heads 64. The 110M parameter base models had 12 layers, each with 12
+attention heads. The model embedding size was
+768, the feed forward layers had a hidden size of
+2,048, and the key/value dimension size for the
+attention heads 64.
+
+
+
