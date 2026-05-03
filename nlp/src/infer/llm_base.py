@@ -1,4 +1,4 @@
-from log_utils import setup_logging
+from .logging import setup_logging
 from typing import List
 
 

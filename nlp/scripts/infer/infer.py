@@ -1,21 +1,25 @@
 import os, argparse, json, gc, sys
+from itertools import chain, accumulate
 
 
 # cwd = '/raid_igvozdarev/ASP/VD'
 # cwd = '.'
 # os.chdir(cwd)
-module_path = r'/raid_igvozdarev/scripts'
 # module_path = r'C:/Users/el1ja/Desktop/repo/modules'
 # sys.path.extend([module_path, os.path.dirname(os.path.abspath(__file__))])
-sys.path.extend([module_path])
+
+repo = r'/raid_igvozdarev/repo'
+sys.path.extend([repo])
 
 
-from nlp_utils.set_seed import set_random_seed
+
+from nlp_utils.set_seed import set_seed
+from nlp_utils.utils.io import *
 
 import torch
 torch.set_float32_matmul_precision('high')
 
-from llm import LLM
+from nlp.src.infer.llm import LLM
 
 
 def collect():
@@ -24,59 +28,69 @@ def collect():
     torch.cuda.empty_cache()
 
 
-def read_dataset_and_generate(llm, conv_dataset_file, tokenizer_params, batch_size):
-    with open(conv_dataset_file, encoding="utf-8") as d:
-        conversations = [json.loads(line) for line in d]
-    if not conversations:
+def read_dataset(conv_dataset_file):
+    convs = read_jsonl(conv_dataset_file)
+    if not convs:
         print('\nconv_dataset_file is empty!\n')
         return []
     print('\nconversations loaded!\n')
-    conversations_sets = conversations
-    if not 'instr' in conversations[0]:
-        conversations_sets = [{'instr': None, 'conversations': conversations}]
 
-    for conversations_set in conversations_sets:
-        print(f'\ninstr = {conversations_set["instr"]}\n')
-        conversations_set['prompts'], conversations_set['completions'] = llm.generate(
-            conversations_set['conversations'], 
-            batch_size,
-            tokenizer_params
-        )
+    if len({'prompt', 'inputs'} & convs[0].keys()) != 2:
+        return convs
+
+    convs_ = [
+        [{'role': 'user', 'content': conv['prompt'].format(**dict(zip(conv['inputs'].keys(), input)))}] 
+        for conv in convs
+        for input in zip(*conv['inputs'].values())
+    ]
+    # convs_ = convs_[:5]
+    input_field = list(convs[-1]['inputs'].keys())[-1]
+    counts = [len(conv['inputs'][input_field]) for conv in convs]
     
-    return conversations_sets
+    # print(f'\n\n{convs[:2]}\n\n')
+    return convs_, counts
 
 
-def save_conversations(conversations_sets, output_dir):
-    os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, "output.jsonl")
-    with open(output_file, "w", encoding="utf-8") as out:
-        for conv_set in conversations_sets:
-            out.write(json.dumps(conv_set, ensure_ascii=False) + '\n')  
+
+def read_config(file):
+    ext = os.path.splitext(file)[-1].lower()
+    exts = ['.json', '.yaml', '.yml']
+    assert ext in exts, f'config ext not in {exts}'
+    return (read_json if ext == '.json' else read_yaml)(file)
+
+
 
 
 def main(args):
 
-    set_random_seed(args.seed)
+    set_seed(args.seed)
 
-    with (
-        open(args.model_config, encoding="utf-8") as c,
-        open(args.tokenizer_config, encoding="utf-8") as t_c
-    ):
-        model_config = json.load(c)
-        tokenizer_params = json.load(t_c)['tokenizer_config']
+    model_config = read_config(args.model_config)
+    chat_params = read_config(args.chat_config)['chat_config']
 
-    llm = LLM(args.model_name, model_config, tokenizer_params, args.engine)
+    llm = LLM(args.model_name, model_config, chat_params, args.engine)
 
-    conversations_sets = read_dataset_and_generate(llm, args.conv_dataset, tokenizer_params, args.batch_size)
+    convs, counts = read_dataset(args.conv_dataset)
+
+    prompts, compls = llm.generate(
+        convs, 
+        args.batch_size,
+        chat_params
+    )
+    starts = chain([0], accumulate(counts))
+    results = [{'prompts': prompts[i:i+count], 'compls': compls[i:i+count]} for i, count in zip(starts, counts)]
 
     del llm
     collect()
 
     if args.only_completions:
-        for conversations_set in conversations_sets:
-            del conversations_set['prompts'], conversations_set['conversations']
+        del results['prompts']
 
-    save_conversations(conversations_sets, args.output_dir)
+    dir = os.path.dirname(args.out_file)
+    if dir:
+        os.makedirs(dir, exist_ok=True)
+    write_jsonl(results, args.out_file)
+
 
 
 
@@ -86,10 +100,10 @@ if __name__ == '__main__':
     parser.add_argument("--engine", type=str, default='vllm', help="vllm / unsloth")
     parser.add_argument("--model_name", type=str)
     parser.add_argument("--model_config", type=str)
-    parser.add_argument("--tokenizer_config", type=str)
+    parser.add_argument("--chat_config", type=str)
     parser.add_argument("--conv_dataset", type=str, help="conversations dataset (json)")
     parser.add_argument("--batch_size", type=int, default=9999)
-    parser.add_argument("--output_dir", type=str, default='output_dir')
+    parser.add_argument("--out_file", type=str, default='output_dir/output.json')
     parser.add_argument("--only_completions", action="store_true")
     parser.add_argument("--seed", type=int, default='42')
     args = parser.parse_args()

@@ -1,4 +1,4 @@
-from llm_base import LLM_base
+from .llm_base import LLM_base
 
 from typing import List
 

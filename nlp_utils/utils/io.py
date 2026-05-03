@@ -5,13 +5,28 @@ implementation instead: https://github.com/wq2012/word_levenshtein
 """
 import numpy as np
 from enum import Enum
-import json, os
+import json, os, yaml
 from typing import Callable
 
 
 
-def read_jsonl(file_name):
-    with open(file_name, encoding="utf-8") as r:
+def read(file, reader):
+    with open(file, encoding="utf-8") as f:
+        try:
+            return reader(f)
+        except Exception as e:
+            print(f'file = {file}')
+            raise e    
+
+def read_json(file):
+    return read(file, json.load)
+
+def read_yaml(file):
+    return read(file, yaml.safe_load)
+
+
+def read_jsonl(file):
+    with open(file, encoding="utf-8") as r:
         return [json.loads(line) for line in r]
 
 def write_jsonl(records, path):
@@ -19,7 +34,7 @@ def write_jsonl(records, path):
         for r in records:
             w.write(json.dumps(r, ensure_ascii=False) + "\n")
 
-def export_to_json(obj, filename, overwrite=True):
+def write_json(obj, filename, overwrite=True):
     # если overwrite=False то данные не будут перезаписываться если файл уже существует
     if os.path.dirname(filename):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -27,7 +42,8 @@ def export_to_json(obj, filename, overwrite=True):
         with open(filename, 'w') as f:
             json.dump(obj, f, indent=2, ensure_ascii=False)
 
-def export_to_yaml(obj, filename, overwrite=True):
+
+def write_yaml(obj, filename, overwrite=True):
     # если overwrite=False то данные не будут перезаписываться если файл уже существует
     import yaml
     class IndentDumper(yaml.Dumper):
@@ -38,13 +54,6 @@ def export_to_yaml(obj, filename, overwrite=True):
             yaml.dump(obj, f, allow_unicode=True, Dumper=IndentDumper, width=float("inf"))
 
 
-def load_json(filename):
-    with open(filename) as f:
-        try:
-            return json.load(f)
-        except Exception as e:
-            print(f'filename = {filename}')
-            raise e
 
 
 def get_files_from_dir(

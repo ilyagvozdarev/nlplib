@@ -1,8 +1,8 @@
 from tqdm import tqdm
 import importlib
 
-from utils import conversations_to_inputs_prompts, gen_batch
-from log_utils import setup_logging
+from .utils import conversations_to_inputs_prompts, gen_batch
+from .logging import setup_logging
 
 
 class LLM:
@@ -21,8 +21,8 @@ class LLM:
 
 
     def load_model(self, model_name, model_config):
-        module = importlib.import_module(f'llm_{self.engine}')
-        llm_engine = getattr(module, f'LLM_{self.engine}')
+        llm_module = importlib.import_module(f'.llm_{self.engine}', package=__package__)
+        llm_engine = getattr(llm_module, f'LLM_{self.engine}')
         self.llm = llm_engine(model_name, model_config)
         self.logger.info(f"model_name = {model_name}")
 

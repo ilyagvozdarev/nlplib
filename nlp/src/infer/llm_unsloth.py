@@ -1,7 +1,7 @@
 import os
 from typing import List
 
-from llm_base import LLM_base
+from .llm_base import LLM_base
 
 from unsloth import FastLanguageModel as flm
 
