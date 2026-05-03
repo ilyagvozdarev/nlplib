@@ -1,0 +1,36 @@
+
+
+считываем конфиг обучения (пример - saiga_nemo_12b_simpo_m26.json)
+
+скачиваем модель из model_name
+
+оборачиваем в (AutoModelForCausalLM/FastLanguageModel)
+
+переназначает спец токены токенизатора (["bos_token", "eos_token", "pad_token"])
+
+если fix_untrained_tokens = True то инициализируем эмбеддинги необученных токенов (fix_untrained_tokens())
+
+считываем датасеты
+
+data_collator = DefaultDataCollator()
+
+если в конфиге есть ключ "adaptation" то оборачивает в peft-модель с параметрами из конфига:
+    если веса входных и выходных эмбеддингов базовой модели связаны (model.config.tie_word_embeddings) 
+    И в полностью обучаемых модулях адаптера (modules_to_save конфига обучения) находится либо входной ("embed_tokens") либо выходной ("lm_head") эмбеддинг 
+        (если оба в modules_to_save заданы оба, то ошибка, тк входной и выходной эмбеддинг при обучении
+        адаптера обучались бы отдельно, то есть не были бы связаны, так как для любого модуля в modules_to_save создается отдельный тензор)
+    И модель не 'gemma3' (?)
+    то вручную связываем выходной и входной эмбеддинг базовой модели в адаптере (полностью обучаем будет либо входной либо выходной эмбеддинг,
+    но тк они будут связаны то они будут обучаться оба):
+        model.base_model.model.model.embed_tokens.modules_to_save["default"].weight = \
+            model.base_model.model.lm_head.modules_to_save["default"].weight
+
+
+обучение:
+  CustomTrainer - Trainer в котором переопределен create_optimizer:
+      create_optimizer():
+          если embedding_learning_rate не задан то создаем как обычно
+          иначе если self.optimizer не задан то создаем оптимизатор с заданным embedding_learning_rate для модулей из modules_to_save (unsloth.trainer._create_unsloth_optimizer)
+
+
+    

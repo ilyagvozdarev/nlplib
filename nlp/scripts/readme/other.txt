@@ -1,0 +1,9 @@
+merge_lora(model_name: str, output_path: str, device_map: str = "auto")
+
+    скачивает базовую модель заданной peft-модели, объединяет их и сохраняет по заданному пути
+
+
+
+resave_model(model_name: str, output_path: str, device_map: str = "auto"):
+
+    скачивает LM модель и токенизатор и сохраняет по заданному пути

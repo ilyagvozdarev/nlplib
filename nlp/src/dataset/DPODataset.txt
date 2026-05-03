@@ -1,0 +1,43 @@
+
+__init__
+
+        original_records: List[Dict],
+        tokenizer: AutoTokenizer,
+        max_tokens_count: int,
+        sample_rate: float = 1.0,
+        apply_chat_template: bool = False,
+        convert_content = False
+
+
+	пример - запись с 3 разговорами (в ключах prompt, chosen, rejected)
+
+	- sample_rate: оставляет пример (разговор) с вероятностью sample_rate
+
+	- если convert_content = True то преобразует в сообщениях разговора строку контента в словарь с ключами {"type": "text", "text": контент} (content_to_type_and_text())
+
+	- пропускаем примеры у которых какой-то токенизированный разговор (токенизация после применения шаблона (add_special_tokens=False) к prompt + chosen или prompt + rejected) 
+	  имеет длину больше чем max_tokens_count (конфиг обучения) - 5
+	  Notes: 
+	  	после применения шаблона если получился список списков (видимо какие-то токенизаторы могут возвращать так один токенизированный разговор при apply_chat_template) то берем 0-элемент
+	
+	- если apply_chat_template = True то:
+		- применяем шаблон к разговору prompt, chosen, rejected
+		- в chosen и rejected удаляем tokenizer.bos_token
+		- проверям что chosen и rejected не состоят только из пробельных символов
+
+	возвращает список записей {"prompt": prompt, "chosen": chosen, "rejected": rejected}	
+
+
+
+content_to_type_and_text
+
+	преобразует в сообщениях разговора строку контента в словарь с ключами {"type": "text", "text": контент}
+
+	
+
+
+
+
+
+
+
