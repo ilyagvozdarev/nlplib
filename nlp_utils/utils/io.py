@@ -6,7 +6,7 @@ implementation instead: https://github.com/wq2012/word_levenshtein
 import numpy as np
 from enum import Enum
 import json, os, yaml
-from typing import Callable
+from typing import Callable, Any
 
 
 
@@ -34,13 +34,13 @@ def write_jsonl(records, path):
         for r in records:
             w.write(json.dumps(r, ensure_ascii=False) + "\n")
 
-def write_json(obj, filename, overwrite=True):
+def write_json(obj, filename, overwrite=True, indent=2):
     # если overwrite=False то данные не будут перезаписываться если файл уже существует
     if os.path.dirname(filename):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
     if overwrite or not overwrite and not os.path.isfile(filename):
         with open(filename, 'w') as f:
-            json.dump(obj, f, indent=2, ensure_ascii=False)
+            json.dump(obj, f, indent=indent, ensure_ascii=False)
 
 
 def write_yaml(obj, filename, overwrite=True):
@@ -54,6 +54,11 @@ def write_yaml(obj, filename, overwrite=True):
             yaml.dump(obj, f, allow_unicode=True, Dumper=IndentDumper, width=float("inf"))
 
 
+def write_txt(text, filename):
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
 
 
 def get_files_from_dir(
@@ -61,8 +66,12 @@ def get_files_from_dir(
   exclude_dir_names = [],
   exts=['txt', 'json', 'yaml']  
 ):
-    from nlp_utils.regexp import split_file_ext
+    # exts = None или [] - возращает все файлы
 
+    exts_found = set()
+
+    if exts is None:
+        exts = []
     files_res = []
     walk = os.walk(dir, topdown=True, onerror=None, followlinks=False)
 
@@ -70,27 +79,42 @@ def get_files_from_dir(
         intermediate_dirs = root.split(os.sep)
         need_exclude_dir = any(set(intermediate_dirs) & set(exclude_dir_names))
         if not need_exclude_dir: 
-            files_res.extend([
-                root + os.sep + file 
-                for file in files 
-                if split_file_ext(file)[1] in exts
-            ])
-    return files_res
+            files_ = []
+            for file in files:
+                ext = os.path.splitext(file)[1]
+                if ext in exts or len(exts) == 0:
+                    files_.append(root + os.sep + file)
+                    exts_found.add(ext)
+            files_res.extend(files_)
+    return files_res, exts_found
 
 
-def load_data_from_files(
-    files_list, 
-    extractor: Callable,
-    added_filename_key = None
+def read_sources(
+    files, 
+    reader: Callable[..., Any] | dict[str, Callable[..., Any]],
+    add_filename = True
 ):
+    # reader - reader или маппинг расширение->reader
     data = []
-    for file in files_list:
-        file_dir, filename = os.path.split(file)
-        examples = extractor(file)
-        for example in examples:
-            data_d = {**example}
-            if added_filename_key:
-                data_d.update({added_filename_key: filename})
-            data.append(data_d)
+    reader_ = reader
+    for file in files:
+        _, filename = os.path.split(file)
+        if isinstance(reader, dict):
+            reader_ = reader[os.path.splitext(filename)[1][1:]]
+        data_file = reader_(file)
+        if add_filename:
+            data_file = (filename, data_file)
+        data.append(data_file)
     return data
 
+
+
+
+def print_files_tree(data_dir):
+    for root, dirs, files in os.walk(data_dir):
+        level = root.replace(data_dir, '').count(os.sep)
+        indent = ' ' * 4 * (level)
+        print('{}{}/'.format(indent, os.path.basename(root)))
+        subindent = ' ' * 4 * (level + 1)
+        for f in files:
+            print('{}{}'.format(subindent, f))

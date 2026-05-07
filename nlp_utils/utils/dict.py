@@ -1,12 +1,7 @@
-"""Function for the Levenshtein algorithm.
-
-Note: This Python implementation is very inefficient. Please use this C++
-implementation instead: https://github.com/wq2012/word_levenshtein
-"""
-import numpy as np
 from enum import Enum
 import json, os
-from typing import Callable
+from typing import Callable, Iterable
+from collections.abc import MutableMapping
 
 
 
@@ -41,18 +36,24 @@ def rename_dict_keys_deep(data, key_mapping):
         return data
 
 
-def dict_to_flatten_keys(dictionary, parent_key='', separator='_'):
-    from collections.abc import MutableMapping
+def flatten_dict(dictionary, separator='__'):
+    return {separator.join(map(str, keys)): val for keys, val in dict_to_flatten_keys(dictionary)}
+
+
+
+def dict_to_flatten_keys(dictionary, parent_keys=None):
+    # dict -> список из (список ключей до non-dict значения, non-dict значение)
+    if parent_keys is None:
+        parent_keys = []
     items = []
     for key, value in dictionary.items():
-        new_key = parent_key + separator + key if parent_key else key
         if isinstance(value, MutableMapping):
-            items.extend(dict_to_flatten_keys(
-                value, new_key, separator=separator
-            ).items())
+            items.extend(dict_to_flatten_keys(value, parent_keys + [key]))
         else:
-            items.append((new_key, value))
-    return dict(items)
+            items.append((parent_keys + [key], value))
+    return items
+
+
 
 
 def is_keys_values_in_dict(
@@ -87,3 +88,17 @@ def get_dicts_by_filter_dicts(
                 res.append(d)
                 break
     return res
+
+
+def count_nested(d, count_to='elem'):
+    # рекурсивный подсчет количества записей в словаре
+    # count_to='elem': если значение iterable то считает количество элементов
+    count = 0
+    for v in d.values():
+        if isinstance(v, dict):
+            count += count_nested(v)
+        elif isinstance(v, Iterable) and count_to == 'elem':
+            count += len(v) 
+        else:
+            count += 1
+    return count
