@@ -1,0 +1,31 @@
+generation_config:        # https://huggingface.co/Qwen/Qwen3.5-27B#instruct-or-non-thinking-mode
+  n: 2                    
+  max_tokens: 4000
+  seed: 42
+  temperature: 0.7
+  top_k: 20
+  top_p: 0.8
+  min_p: 0.0
+  presence_penalty: 1.5
+# gc_greedy:
+#   n: 2               
+#   max_tokens: 4000
+#   seed: 42
+#   temperature: 0.0
+#   top_k: -1
+#   top_p: 1
+model:
+  disable_custom_all_reduce: true
+  enable_prefix_caching: true
+  gpu_memory_utilization: 0.9
+  max_model_len: 7000
+  tensor_parallel_size: 2
+# model_main:
+#   enable_prefix_caching: true
+#   gpu_memory_utilization: 0.9
+#   max_model_len: 7000
+#   max_num_seqs: 16
+# model_parallel_1:
+#   enable_prefix_caching: true
+#   gpu_memory_utilization: 0.9
+#   tensor_parallel_size: 2

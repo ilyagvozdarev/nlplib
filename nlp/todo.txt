@@ -1,8 +1,0 @@
-проверить скорость обучения без задания pad_to_multiple_of
-
-
-# train_unsloth.py
-проверить другие значения:
-os.environ["UNSLOTH_RETURN_LOGITS"] = "0"           # чтобы Unsloth возвращал логиты
-os.environ["TOKENIZERS_PARALLELISM"] = "false"      # чтобы предотвратить предупреждения в токенизаторах Huggingface
-torch._dynamo.config.cache_size_limit = 128

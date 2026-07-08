@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nlplib"
+version = "0.1.0"
+description = "Internal NLP/LLM utilities"
+requires-python = ">=3.9"
+dependencies = [
+    # "torch",
+    # "vllm",
+    # "pydantic",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nlplib*"]

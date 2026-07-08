@@ -1,0 +1,11 @@
+chat_config:
+  add_generation_prompt: true
+  continue_final_message: false
+  enable_thinking: false
+chat_config_main:
+  add_generation_prompt: false
+  continue_final_message: false
+  enable_thinking: false
+chat_config_non_tnink:
+  add_generation_prompt: true
+  enable_thinking: false
