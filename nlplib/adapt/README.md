@@ -1,0 +1,1 @@
+Taken from https://github.com/RefalMachine/ruadapt/tree/main/ruadapt/ushanka and modified
