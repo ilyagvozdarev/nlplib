@@ -234,9 +234,6 @@ class ConvDataset(Dataset):
             for i, (left, right) in enumerate(input['offset_mapping']):
                 if left == span_l or right == span_r:
                     bounds.append(i)
-            # print('span_l = ', span_l, 'span_r', span_r)
-            # print('offsets = ', input['offset_mapping'])
-            # print('bounds = ', bounds)
             if len(bounds) != 2:
                 print('len(bounds) != 2')
                 print(prompt_)
@@ -261,7 +258,6 @@ class ConvDataset(Dataset):
 
 
     def convert_conversation(self, conversation):
-
         messages = copy.deepcopy(conversation["messages"])
 
         if self.convert_content:

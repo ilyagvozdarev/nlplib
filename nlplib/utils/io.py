@@ -102,10 +102,5 @@ def read_sources(
     return data
 
 
-def print_files_tree(dir_path: Path, indent: int = 0):
-    entries = sorted(dir_path.iterdir(), key=lambda e: (e.is_file(), e.name))
-    for entry in entries:
-        print("   " * indent + "|- " + entry.name)
-        if entry.is_dir():
-            print_files_tree(entry, indent + 1)
+
 
