@@ -9,7 +9,7 @@ import regex
 
 from datatrove.utils.typeshelper import Languages
 
-from lang.ru.stop_words import get_stop_words
+from .lang.ru.stop_words import get_stop_words
 
 
 PUNCTUATION = "!/—”:％１〈&(、━\\【#%「」，】；+^]~“《„';’{|∶´[=-`*．（–？！：$～«〉,><》)?）。…@_.\"}►»" + "".join(

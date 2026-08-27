@@ -11,7 +11,7 @@ from loguru import logger
 from datatrove.utils._import_utils import ASSETS_PATH, check_required_dependencies
 from text import TERMINAL_PUNCTUATION
 
-from rare_langs import *
+from .rare_langs import *
 
 
 def strip_strings(els: list[str]) -> list[str]:
