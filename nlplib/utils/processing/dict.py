@@ -42,7 +42,7 @@ def flatten_dict(dictionary, separator='__'):
     return {separator.join(map(str, keys)): val for keys, val in dict_to_flatten_keys(dictionary)}
 
 
-def dict_to_flatten_keys(d, parent_keys=None):
+def dict_to_flatten_keys(d, parent_keys=None, nested_key=None):
     """
     a list of (list of keys leading to a non-dict value, non-dict value)
     """
@@ -58,9 +58,9 @@ def dict_to_flatten_keys(d, parent_keys=None):
 
 
 def is_keys_values_in_dict(dict: dict, filter_dict: dict):
-    '''
-        проверяет содержатся ли ключи-значения filter_dict в ключах-значениях dict
-    '''
+    """
+    checks whether the keys and values ​​of filter_dict are contained in the keys and values ​​of dict
+    """
     return not any([
         filter_k not in dict or filter_dict[filter_k] != dict[filter_k] 
         for filter_k in filter_dict
@@ -82,3 +82,37 @@ def count_nested(d, count_to='elem'):
         else:
             count += 1
     return count
+
+
+def apply_nested(d, func, nested_key='nested', parents=None):
+    """
+    Applies func to the dictionary and then recursively to the value
+    under the 'nested' key.
+
+    A list is processed element by element, so the 'nested' value may be
+    either a dictionary or a list of dictionaries.
+
+    Parameters
+    ----------
+    d:
+        the source dictionary or list
+    func:
+        a callable dict, parents -> dict
+    nested_key:
+        the key whose value is processed recursively
+    parents:
+        list of parent dicts
+
+    Returns
+    -------
+    a new dictionary/list; neither the source data nor func's result is modified
+    """
+    parents = parents or []
+    if isinstance(d, list):
+        return [apply_nested(item, func, nested_key, parents) for item in d]
+    if not isinstance(d, dict):
+        return d
+    result = func(d, parents)
+    if nested_key in result:
+        result = {**result, nested_key: apply_nested(result[nested_key], func, nested_key, parents + [result])}
+    return result

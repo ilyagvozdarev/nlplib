@@ -6,7 +6,7 @@ Internal library of reusable components for NLP projects: data preparation, LLM 
 Clone repo 
 ```bash
 git clone https://github.com/ilyagvozdarev/nlplib.git
-cd timeseries-clustering
+cd nlplib
 ```
 
 Install package
