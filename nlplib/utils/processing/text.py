@@ -274,7 +274,9 @@ def remove_stop_words(texts, stop_words=None, stop_words_names=()):
     if isinstance(texts, str):
         raise TypeError("ожидались токены, а не строка")
     if stop_words is not None and stop_words_names:
-        raise ValueError("укажите либо stop_words, либо stop_words_names") 
+        raise ValueError("укажите либо stop_words, либо stop_words_names")
+    if isinstance(stop_words, str):
+        raise ValueError("stop_words должен быть коллекцией")
     texts = list(texts)
     method = (
         _remove_stop_words if texts and isinstance(texts[0], str) 

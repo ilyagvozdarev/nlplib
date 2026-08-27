@@ -22,10 +22,10 @@ def _load(name: StopWordSet) -> frozenset[str]:
         case StopWordSet.DOMAIN_TEST:
             return DOMAIN_TEST
         case StopWordSet.RU_SPACY:
-            from ru_spacy import RU_SPACY
+            from .ru_spacy import RU_SPACY
             return frozenset(RU_SPACY)
         case StopWordSet.RU_NLTK:
-            from ru_nltk import RU_NLTK
+            from .ru_nltk import RU_NLTK
             return frozenset(RU_NLTK)
         case StopWordSet.EN_SKLEARN:
             from sklearn.feature_extraction import _stop_words
