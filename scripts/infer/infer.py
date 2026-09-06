@@ -63,8 +63,7 @@ def main(args):
     write_jsonl(results, args.out_file)
 
 
-
-if __name__ == '__main__':
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--engine", type=str, default='vllm', help="vllm / unsloth")
     parser.add_argument("--model_name", type=str)
@@ -75,6 +74,9 @@ if __name__ == '__main__':
     parser.add_argument("--out_file", type=str, default='output_dir/output.json')
     parser.add_argument("--only_completions", action="store_true")
     parser.add_argument("--seed", type=int, default='42')
-    args = parser.parse_args()
+    return parser.parse_args()    
 
+
+if __name__ == '__main__':
+    args = parse_args()
     main(args)

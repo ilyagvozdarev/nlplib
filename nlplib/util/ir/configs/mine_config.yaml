@@ -1,0 +1,8 @@
+semantic:
+  range_min: 5
+  range_max: 35
+  num_negatives: 30
+  n_top: 1
+  n_rand: 1
+bm_25:
+  top_k: 8
